@@ -9,10 +9,23 @@ import (
 	"syscall"
 	"time"
 	"visprogbackend/internal/server"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
-	server := server.NewServer(":8080")
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL environment variable not set")
+	}
+
+	dbpool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("Ошибка подключения к базе данных: %v", err)
+	}
+	defer dbpool.Close()
+
+	server := server.NewServer(":8080", dbpool)
 
 	go func() {
 		if err := server.Run(); err != nil && err != http.ErrServerClosed {
