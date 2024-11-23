@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 
 	"visprogbackend/models"
 
@@ -15,8 +16,13 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true }, // TODO: В продакшене необходимо настроить CheckOrigin для безопасности!  Например: return r.Header.Get("Origin") == "http://localhost:3000"
+	CheckOrigin:     func(r *http.Request) bool { return true },
 }
+
+var (
+	dataMutex sync.Mutex
+	messages  []models.Message
+)
 
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -46,27 +52,12 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			fmt.Println("Полученные данные:", сообщение)
 
-			файл, err := os.OpenFile("данные.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				log.Println("Ошибка открытия файла:", err)
-				continue
-			}
-			defer файл.Close()
+			dataMutex.Lock()
+			messages = append(messages, сообщение)
+			dataMutex.Unlock()
 
-			jsonДанные, err := json.Marshal(сообщение)
-			if err != nil {
-				log.Println("Ошибка маршалинга JSON:", err)
-				continue
-			}
-
-			if _, err := файл.Write(jsonДанные); err != nil {
+			if err := saveMessagesToFile(); err != nil {
 				log.Println("Ошибка записи в файл:", err)
-				continue
-			}
-
-			if _, err := файл.Write([]byte("\n")); err != nil {
-				log.Println("Ошибка записи новой строки в файл:", err)
-				continue
 			}
 
 			if err := conn.WriteMessage(websocket.TextMessage, []byte("Данные получены")); err != nil {
@@ -75,4 +66,38 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func HandleDataRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "http://localhost:8000")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	dataMutex.Lock()
+	defer dataMutex.Unlock()
+
+	jsonData, err := json.Marshal(messages)
+	if err != nil {
+		log.Println("Ошибка маршалинга JSON:", err)
+		http.Error(w, "Ошибка обработки данных", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonData)
+}
+
+func saveMessagesToFile() error {
+	dataMutex.Lock()
+	defer dataMutex.Unlock()
+
+	file, err := os.Create("data.json")
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(messages)
 }

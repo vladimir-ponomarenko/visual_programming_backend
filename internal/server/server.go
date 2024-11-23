@@ -34,6 +34,7 @@ func (s *Server) Run() error {
 
 func (s *Server) configureRouter() {
 	s.router.HandleFunc("/ws", HandleWebSocket)
+	s.router.HandleFunc("/data", HandleDataRequest)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
